@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Session, Message, SocraticModality, CreateMessageRequest } from '../types/index';
-import { getApiClient } from '../services/api.client';
+import { getApiClient, getApiErrorMessage } from '../services/api.client';
 
 interface ChatStore {
   sessions: Session[];
@@ -186,27 +186,33 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       });
 
       // Replace temp message and add AI response
+      if (!response.ai_response) {
+        set((state) => {
+          const filtered = state.messages.filter((m) => !m.id.startsWith('temp-'));
+          return {
+            messages: [...filtered, response.message],
+            isGenerating: false,
+            error:
+              'AI did not return a response. Check that OPENAI_API_KEY is configured on the server.',
+          };
+        });
+        return;
+      }
+
       set((state) => {
         const filtered = state.messages.filter((m) => !m.id.startsWith('temp-'));
-        const messages = [response.message];
-
-        if (response.ai_response) {
-          messages.push(response.ai_response);
-        }
-
         return {
-          messages: [...filtered, response.message, ...(response.ai_response ? [response.ai_response] : [])],
+          messages: [...filtered, response.message, response.ai_response!],
           isGenerating: false,
           currentModality: response.modality || state.currentModality,
         };
       });
     } catch (error) {
       // Remove optimistic message on error
-      const message = error instanceof Error ? error.message : 'Failed to send message';
       set((state) => ({
         messages: state.messages.filter((m) => !m.id.startsWith('temp-')),
         isGenerating: false,
-        error: message,
+        error: getApiErrorMessage(error, 'Failed to send message'),
       }));
       throw error;
     }

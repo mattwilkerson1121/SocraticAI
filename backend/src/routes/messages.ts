@@ -7,6 +7,7 @@ import { OpenAIService } from '../services/openai.service';
 import { DocumentService } from '../services/document.service';
 import { getTaskQueue } from '../queue/task.queue';
 import { isSuperAdmin } from '../utils/roles';
+import { resolveOpenAICredentials } from '../utils/openai-credentials';
 
 const router = Router();
 
@@ -138,29 +139,24 @@ router.post('/', async (req: Request, res: Response) => {
       throw new ApiError(500, 'Failed to create message', 'MESSAGE_ERROR');
     }
 
-    // Get user's API key
-    const { data: apiKeys, error: keyError } = await supabaseAdmin
-      .from('user_api_keys')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('provider', 'openai')
-      .eq('is_active', true)
-      .limit(1);
+    // Get OpenAI credentials (per-user key, or server OPENAI_API_KEY fallback)
+    const credentials = await resolveOpenAICredentials(user.id);
 
-    if (keyError || !apiKeys || apiKeys.length === 0) {
+    if (!credentials) {
       logger.warn({ userId: user.id }, 'No OpenAI API key found');
-
-      // Return user message only (AI disabled for this user)
-      return res.status(201).json({
-        message: userMessage,
-        ai_response: null,
-        note: 'Please add an OpenAI API key in settings to enable AI responses',
-      });
+      throw new ApiError(
+        400,
+        'OpenAI API key is not configured. Set OPENAI_API_KEY on the server or add a key for this user.',
+        'MISSING_API_KEY'
+      );
     }
 
-    // Decrypt API key (for MVP, storing in plain text in env)
-    const userApiKey = apiKeys[0].encrypted_key;
-    const aiService = new OpenAIService(userApiKey, apiKeys[0].model_name || 'gpt-4o');
+    logger.debug(
+      { userId: user.id, keySource: credentials.source, model: credentials.modelName },
+      'Using OpenAI credentials'
+    );
+
+    const aiService = new OpenAIService(credentials.apiKey, credentials.modelName);
 
     // Determine modality (auto-classify if not provided)
     let modality = (modalityType as SocraticModality) || 'socratic_auditor';
@@ -304,22 +300,16 @@ router.post('/:messageId/stream', async (req: Request, res: Response) => {
       return;
     }
 
-    // Get user API key
-    const { data: apiKeys } = await supabaseAdmin
-      .from('user_api_keys')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('provider', 'openai')
-      .eq('is_active', true)
-      .limit(1);
+    // Get OpenAI credentials (per-user key, or server OPENAI_API_KEY fallback)
+    const credentials = await resolveOpenAICredentials(user.id);
 
-    if (!apiKeys || apiKeys.length === 0) {
+    if (!credentials) {
       res.write('data: {"error": "No API key configured"}\n\n');
       res.end();
       return;
     }
 
-    const aiService = new OpenAIService(apiKeys[0].encrypted_key, apiKeys[0].model_name || 'gpt-4o');
+    const aiService = new OpenAIService(credentials.apiKey, credentials.modelName);
 
     // Determine modality
     let modality = (modalityType as SocraticModality) || 'socratic_auditor';
