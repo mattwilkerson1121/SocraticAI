@@ -86,11 +86,17 @@ export class OpenAIService {
   private maxTokens: number;
 
   constructor(apiKey?: string, model: string = 'gpt-4o', maxTokens: number = 2000) {
+    const resolvedKey = apiKey || process.env.OPENAI_API_KEY;
+    if (!resolvedKey) {
+      throw new Error(
+        'OpenAI API key missing. Set OPENAI_API_KEY in the server environment or provide a user key.'
+      );
+    }
     this.client = new OpenAI({
-      apiKey: apiKey || process.env.OPENAI_API_KEY,
+      apiKey: resolvedKey,
     });
-    this.model = model;
-    this.maxTokens = maxTokens;
+    this.model = model || process.env.OPENAI_MODEL || 'gpt-4o';
+    this.maxTokens = maxTokens || parseInt(process.env.OPENAI_MAX_TOKENS || '2000', 10);
   }
 
   /**
@@ -327,11 +333,15 @@ Respond with ONLY the category name, no explanation.`,
 }
 
 /**
- * Factory function to create OpenAI service with user's custom API key
+ * Factory function to create OpenAI service with user's custom API key,
+ * falling back to server OPENAI_API_KEY / OPENAI_MODEL from .env (all modalities).
  */
 export function createOpenAIServiceForUser(
-  userApiKey: string,
-  model: string = 'gpt-4o'
+  userApiKey?: string | null,
+  model?: string | null
 ): OpenAIService {
-  return new OpenAIService(userApiKey, model);
+  return new OpenAIService(
+    userApiKey || process.env.OPENAI_API_KEY,
+    model || process.env.OPENAI_MODEL || 'gpt-4o'
+  );
 }

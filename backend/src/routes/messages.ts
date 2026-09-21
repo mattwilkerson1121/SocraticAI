@@ -139,6 +139,12 @@ router.post('/', async (req: Request, res: Response) => {
       throw new ApiError(500, 'Failed to create message', 'MESSAGE_ERROR');
     }
 
+    // Bump session activity immediately so it stays in sidebar history
+    await supabaseAdmin
+      .from('sessions')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+
     // Get OpenAI credentials (per-user key, or server OPENAI_API_KEY fallback)
     const credentials = await resolveOpenAICredentials(user.id);
 
@@ -158,7 +164,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const aiService = new OpenAIService(credentials.apiKey, credentials.modelName);
 
-    // Determine modality (auto-classify if not provided)
+    // Determine modality — same credential path for every Socratic mode
     let modality = (modalityType as SocraticModality) || 'socratic_auditor';
     if (!modalityType) {
       modality = await aiService.classifyIntent(content);
@@ -213,6 +219,12 @@ router.post('/', async (req: Request, res: Response) => {
       logger.warn({ error: aiError }, 'Failed to save AI response');
       // Continue anyway - user message was saved
     }
+
+    // Keep session in recent history (ChatGPT/Claude-style sidebar ordering)
+    await supabaseAdmin
+      .from('sessions')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
 
     // Log usage
     await supabaseAdmin.from('usage_logs').insert({

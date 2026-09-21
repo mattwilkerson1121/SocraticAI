@@ -6,15 +6,14 @@ import { useAuthStore } from '../store/auth.store';
 import { getApiErrorMessage } from '../services/api.client';
 
 /**
- * Dashboard Page Component
- * Shows projects and allows creating new ones
+ * Dashboard — project picker + chat history (persists when leaving a session).
  */
 export function DashboardPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
   const { projects, currentProject, setCurrentProject, createProject, fetchProjects, isLoading } =
     useProjectsStore();
-  const { sessions, fetchSessions, createSession } = useChatStore();
+  const { sessions, fetchSessions, createSession, isLoadingSessions } = useChatStore();
 
   const [showNewProjectForm, setShowNewProjectForm] = useState(false);
   const [projectName, setProjectName] = useState('');
@@ -51,7 +50,9 @@ export function DashboardPage() {
   const handleCreateSession = async (projectId: string) => {
     setActionError(null);
     try {
-      const newSession = await createSession(projectId, `Session ${new Date().toLocaleString()}`);
+      const project = projects.find((p) => p.id === projectId);
+      if (project) setCurrentProject(project);
+      const newSession = await createSession(projectId, 'New chat');
       navigate(`/chat/${newSession.id}`);
     } catch (error) {
       setActionError(getApiErrorMessage(error, 'Failed to create session'));
@@ -65,190 +66,190 @@ export function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-neutral-900">
-      {/* Header */}
-      <header className="bg-neutral-800 border-b border-neutral-700 px-2xl py-lg">
-        <div className="flex justify-between items-center max-w-7xl mx-auto">
+      <header className="border-b border-neutral-800 bg-neutral-950 px-4 py-4 md:px-8">
+        <div className="mx-auto flex max-w-5xl items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">SocraticAI</h1>
-            <p className="text-neutral-400 text-sm">{user?.email}</p>
+            <h1 className="text-xl font-semibold text-white">SocraticAI</h1>
+            <p className="text-sm text-neutral-500">{user?.email}</p>
           </div>
           <button
             onClick={handleLogout}
-            className="px-lg py-md bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg transition"
+            className="rounded-lg px-3 py-2 text-sm text-neutral-400 transition hover:bg-neutral-800 hover:text-white"
           >
-            Log Out
+            Log out
           </button>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-2xl py-3xl">
+      <div className="mx-auto max-w-5xl px-4 py-8 md:px-8">
         {actionError && (
-          <div className="mb-xl bg-error/10 border border-error/30 text-error px-lg py-md rounded-lg text-sm">
+          <div className="mb-6 rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
             {actionError}
           </div>
         )}
-        {/* Projects Section */}
-        <div className="mb-3xl">
-          <div className="flex justify-between items-center mb-2xl">
-            <h2 className="text-3xl font-bold text-white">Your Projects</h2>
-            <button
-              onClick={() => setShowNewProjectForm(!showNewProjectForm)}
-              className="px-lg py-md bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-semibold transition"
-            >
-              + New Project
-            </button>
+
+        <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-white">Your workspace</h2>
+            <p className="mt-1 text-sm text-neutral-400">
+              Open a past chat or start a new one — conversations stay saved here.
+            </p>
           </div>
-
-          {/* New Project Form */}
-          {showNewProjectForm && (
-            <form
-              onSubmit={handleCreateProject}
-              className="bg-neutral-800 rounded-lg p-2xl mb-2xl border border-neutral-700"
-            >
-              <div className="mb-lg">
-                <label className="block text-sm font-medium text-neutral-200 mb-sm">
-                  Project Name
-                </label>
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="e.g., Business Strategy Q1 2025"
-                  required
-                  className="w-full px-lg py-md bg-neutral-700 border border-neutral-600 rounded-lg text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-
-              <div className="mb-2xl">
-                <label className="block text-sm font-medium text-neutral-200 mb-sm">
-                  Description (optional)
-                </label>
-                <textarea
-                  value={projectDescription}
-                  onChange={(e) => setProjectDescription(e.target.value)}
-                  placeholder="What will you explore?"
-                  rows={3}
-                  className="w-full px-lg py-md bg-neutral-700 border border-neutral-600 rounded-lg text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-
-              <div className="flex gap-md">
-                <button
-                  type="submit"
-                  className="flex-1 px-lg py-md bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-semibold transition"
-                >
-                  Create Project
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowNewProjectForm(false)}
-                  className="flex-1 px-lg py-md bg-neutral-700 hover:bg-neutral-600 text-white rounded-lg transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* Projects Grid */}
-          {isLoading ? (
-            <div className="text-center text-neutral-400 py-3xl">
-              <svg className="w-8 h-8 animate-spin mx-auto mb-lg" fill="none" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              Loading projects...
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="bg-neutral-800 rounded-lg p-3xl text-center border-2 border-dashed border-neutral-700">
-              <p className="text-neutral-400">No projects yet. Create one to get started!</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-lg">
-              {projects.map((project) => (
-                <div
-                  key={project.id}
-                  onClick={() => setCurrentProject(project)}
-                  className="bg-neutral-800 rounded-lg p-2xl border border-neutral-700 hover:border-primary-500 cursor-pointer transition"
-                >
-                  <h3 className="text-lg font-semibold text-white mb-md">{project.name}</h3>
-                  <p className="text-neutral-400 text-sm mb-2xl line-clamp-2">
-                    {project.description || 'No description'}
-                  </p>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCreateSession(project.id);
-                    }}
-                    className="w-full px-lg py-md bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-semibold transition"
-                  >
-                    New Session
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <button
+            onClick={() => setShowNewProjectForm(!showNewProjectForm)}
+            className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-semibold text-neutral-950 transition hover:bg-white"
+          >
+            + New project
+          </button>
         </div>
 
-        {/* Sessions Section */}
-        {currentProject && (
-          <div>
-            <h2 className="text-2xl font-bold text-white mb-2xl">
-              Sessions in "{currentProject.name}"
-            </h2>
+        {showNewProjectForm && (
+          <form
+            onSubmit={handleCreateProject}
+            className="mb-8 rounded-2xl border border-neutral-800 bg-neutral-950 p-6"
+          >
+            <div className="mb-4">
+              <label className="mb-1.5 block text-sm font-medium text-neutral-300">Project name</label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g., Business Strategy Q1"
+                required
+                className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-white placeholder-neutral-500 outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="mb-5">
+              <label className="mb-1.5 block text-sm font-medium text-neutral-300">
+                Description (optional)
+              </label>
+              <textarea
+                value={projectDescription}
+                onChange={(e) => setProjectDescription(e.target.value)}
+                placeholder="What will you explore?"
+                rows={2}
+                className="w-full rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-white placeholder-neutral-500 outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowNewProjectForm(false)}
+                className="rounded-lg px-4 py-2 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
 
-            {sessions.length === 0 ? (
-              <div className="bg-neutral-800 rounded-lg p-3xl text-center border-2 border-dashed border-neutral-700">
-                <p className="text-neutral-400">
-                  No sessions yet. Create one to start a Socratic conversation!
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-md">
-                {sessions.map((session) => (
-                  <div
-                    key={session.id}
-                    onClick={() => navigate(`/chat/${session.id}`)}
-                    className="bg-neutral-800 rounded-lg p-lg border border-neutral-700 hover:border-primary-500 cursor-pointer transition group"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <h3 className="text-white font-semibold group-hover:text-primary-400 transition">
-                          {session.title}
-                        </h3>
-                        <p className="text-neutral-400 text-sm">
-                          {new Date(session.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                      <svg
-                        className="w-5 h-5 text-neutral-600 group-hover:text-primary-400 transition"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 5l7 7-7 7"
-                        />
-                      </svg>
-                    </div>
-                  </div>
+        {isLoading ? (
+          <p className="py-12 text-center text-neutral-500">Loading projects…</p>
+        ) : projects.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-neutral-700 px-6 py-16 text-center text-neutral-400">
+            No projects yet. Create one to start chatting.
+          </div>
+        ) : (
+          <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
+            <div>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Projects
+              </h3>
+              <ul className="space-y-1">
+                {projects.map((project) => (
+                  <li key={project.id}>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentProject(project)}
+                      className={`w-full rounded-xl px-3 py-2.5 text-left text-sm transition ${
+                        currentProject?.id === project.id
+                          ? 'bg-neutral-800 text-white'
+                          : 'text-neutral-400 hover:bg-neutral-900 hover:text-white'
+                      }`}
+                    >
+                      <div className="truncate font-medium">{project.name}</div>
+                    </button>
+                  </li>
                 ))}
-              </div>
-            )}
+              </ul>
+            </div>
+
+            <div>
+              {currentProject && (
+                <>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-white">{currentProject.name}</h3>
+                      {currentProject.description && (
+                        <p className="text-sm text-neutral-500">{currentProject.description}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCreateSession(currentProject.id)}
+                      className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-neutral-950 hover:bg-neutral-200"
+                    >
+                      New chat
+                    </button>
+                  </div>
+
+                  {isLoadingSessions ? (
+                    <p className="py-8 text-sm text-neutral-500">Loading chats…</p>
+                  ) : sessions.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-neutral-700 px-6 py-12 text-center text-neutral-400">
+                      No chats in this project yet.
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          onClick={() => handleCreateSession(currentProject.id)}
+                          className="text-sm font-medium text-primary-400 hover:text-primary-300"
+                        >
+                          Start your first chat
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-neutral-800 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950">
+                      {sessions.map((session) => (
+                        <li key={session.id}>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/chat/${session.id}`)}
+                            className="flex w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition hover:bg-neutral-900"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate font-medium text-white">{session.title}</div>
+                              <div className="mt-0.5 text-xs text-neutral-500">
+                                {new Date(session.updated_at || session.created_at).toLocaleString()}
+                              </div>
+                            </div>
+                            <svg
+                              className="h-4 w-4 shrink-0 text-neutral-600"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 5l7 7-7 7"
+                              />
+                            </svg>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

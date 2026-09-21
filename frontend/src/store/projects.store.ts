@@ -1,6 +1,20 @@
 import { create } from 'zustand';
 import { Project, CreateProjectRequest } from '../types/index';
-import { getApiClient } from '../services/api.client';
+import { getApiClient, getApiErrorMessage } from '../services/api.client';
+
+const PROJECT_STORAGE_KEY = 'socratic_current_project_id';
+
+function persistProjectId(id: string | null) {
+  if (id) {
+    localStorage.setItem(PROJECT_STORAGE_KEY, id);
+  } else {
+    localStorage.removeItem(PROJECT_STORAGE_KEY);
+  }
+}
+
+function readPersistedProjectId(): string | null {
+  return localStorage.getItem(PROJECT_STORAGE_KEY);
+}
 
 interface ProjectsStore {
   projects: Project[];
@@ -8,7 +22,6 @@ interface ProjectsStore {
   isLoading: boolean;
   error: string | null;
 
-  // Actions
   fetchProjects: () => Promise<void>;
   createProject: (data: CreateProjectRequest) => Promise<Project>;
   getProject: (id: string) => Promise<Project>;
@@ -29,10 +42,27 @@ export const useProjectsStore = create<ProjectsStore>((set, get) => ({
     try {
       const apiClient = getApiClient();
       const response = await apiClient.listProjects(100, 0);
-      set({ projects: response.data, isLoading: false });
+      const savedId = readPersistedProjectId();
+      const restored =
+        response.data.find((p) => p.id === savedId) ||
+        get().currentProject ||
+        response.data[0] ||
+        null;
+
+      if (restored) {
+        persistProjectId(restored.id);
+      }
+
+      set({
+        projects: response.data,
+        currentProject: restored,
+        isLoading: false,
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch projects';
-      set({ error: message, isLoading: false });
+      set({
+        error: getApiErrorMessage(error, 'Failed to fetch projects'),
+        isLoading: false,
+      });
     }
   },
 
@@ -41,16 +71,20 @@ export const useProjectsStore = create<ProjectsStore>((set, get) => ({
     try {
       const apiClient = getApiClient();
       const project = await apiClient.createProject(data);
-      
+      persistProjectId(project.id);
+
       set((state) => ({
-        projects: [...state.projects, project],
+        projects: [project, ...state.projects],
+        currentProject: project,
         isLoading: false,
       }));
 
       return project;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create project';
-      set({ error: message, isLoading: false });
+      set({
+        error: getApiErrorMessage(error, 'Failed to create project'),
+        isLoading: false,
+      });
       throw error;
     }
   },
@@ -60,11 +94,14 @@ export const useProjectsStore = create<ProjectsStore>((set, get) => ({
     try {
       const apiClient = getApiClient();
       const project = await apiClient.getProject(id);
+      persistProjectId(project.id);
       set({ currentProject: project, isLoading: false });
       return project;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch project';
-      set({ error: message, isLoading: false });
+      set({
+        error: getApiErrorMessage(error, 'Failed to fetch project'),
+        isLoading: false,
+      });
       throw error;
     }
   },
@@ -83,8 +120,10 @@ export const useProjectsStore = create<ProjectsStore>((set, get) => ({
 
       return project;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update project';
-      set({ error: message, isLoading: false });
+      set({
+        error: getApiErrorMessage(error, 'Failed to update project'),
+        isLoading: false,
+      });
       throw error;
     }
   },
@@ -95,19 +134,24 @@ export const useProjectsStore = create<ProjectsStore>((set, get) => ({
       const apiClient = getApiClient();
       await apiClient.deleteProject(id);
 
-      set((state) => ({
-        projects: state.projects.filter((p) => p.id !== id),
-        currentProject: state.currentProject?.id === id ? null : state.currentProject,
-        isLoading: false,
-      }));
+      set((state) => {
+        const projects = state.projects.filter((p) => p.id !== id);
+        const currentProject =
+          state.currentProject?.id === id ? projects[0] || null : state.currentProject;
+        persistProjectId(currentProject?.id || null);
+        return { projects, currentProject, isLoading: false };
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete project';
-      set({ error: message, isLoading: false });
+      set({
+        error: getApiErrorMessage(error, 'Failed to delete project'),
+        isLoading: false,
+      });
       throw error;
     }
   },
 
   setCurrentProject: (project: Project | null) => {
+    persistProjectId(project?.id || null);
     set({ currentProject: project });
   },
 
