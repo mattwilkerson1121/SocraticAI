@@ -12,9 +12,12 @@ export type UserProfile = {
   user_id: string;
   name: string;
   tier: SubscriptionTier;
+  role: UserRole;
   created_at: string;
   updated_at: string;
 };
+
+export type UserRole = 'user' | 'super_admin';
 
 export type SubscriptionTier = 'free' | 'strategist' | 'stoics';
 
@@ -211,6 +214,7 @@ export type AuthenticatedRequest = {
     id: string;
     email: string;
     aud: string;
+    role: UserRole;
   };
   [key: string]: any;
 };

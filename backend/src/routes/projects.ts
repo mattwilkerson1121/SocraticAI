@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase';
 import { logger, logError } from '../logger';
 import { ApiError, CreateProjectRequest, AuthenticatedRequest } from '../types/index';
 import authMiddleware from '../middleware/auth';
+import { isSuperAdmin } from '../utils/roles';
 
 const router = Router();
 
@@ -18,15 +19,22 @@ router.get('/', async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const { limit = 50, offset = 0 } = req.query;
 
-    logger.debug({ userId: user.id }, 'Fetching projects');
+    logger.debug({ userId: user.id, role: user.role }, 'Fetching projects');
 
-    const { data: projects, error, count } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('projects')
       .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
       .is('archived_at', null) // Exclude archived
-      .order('updated_at', { ascending: false })
-      .range(parseInt(offset as string), parseInt(offset as string) + parseInt(limit as string) - 1);
+      .order('updated_at', { ascending: false });
+
+    if (!isSuperAdmin(user.role)) {
+      query = query.eq('user_id', user.id);
+    }
+
+    const { data: projects, error, count } = await query.range(
+      parseInt(offset as string),
+      parseInt(offset as string) + parseInt(limit as string) - 1
+    );
 
     if (error) {
       throw new ApiError(500, 'Failed to fetch projects', 'FETCH_ERROR');

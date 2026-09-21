@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
+import { validateEmail, validatePassword } from '../utils/credentials';
 
 /**
  * Signup Page Component
@@ -29,8 +30,15 @@ export function SignupPage() {
     setError(null);
 
     // Validation
-    if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters');
+    const emailError = validateEmail(formData.email);
+    if (emailError) {
+      setError(emailError);
+      return;
+    }
+
+    const passwordError = validatePassword(formData.password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -40,7 +48,7 @@ export function SignupPage() {
     }
 
     try {
-      await register(formData.email, formData.password);
+      await register(formData.email.trim(), formData.password);
       navigate('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');

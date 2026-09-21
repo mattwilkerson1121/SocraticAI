@@ -5,6 +5,7 @@ import { logger, logError } from '../logger';
 import { ApiError, AuthenticatedRequest } from '../types/index';
 import authMiddleware from '../middleware/auth';
 import { DocumentService, createDocumentService } from '../services/document.service';
+import { isSuperAdmin } from '../utils/roles';
 
 const router = Router();
 
@@ -146,12 +147,13 @@ router.get('/', async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const { project_id: projectId, limit = 50, offset = 0 } = req.query;
 
-    logger.debug({ userId: user.id, projectId }, 'Fetching documents');
+    logger.debug({ userId: user.id, projectId, role: user.role }, 'Fetching documents');
 
-    let query = supabaseAdmin
-      .from('documents')
-      .select('*', { count: 'exact' })
-      .eq('user_id', user.id);
+    let query = supabaseAdmin.from('documents').select('*', { count: 'exact' });
+
+    if (!isSuperAdmin(user.role)) {
+      query = query.eq('user_id', user.id);
+    }
 
     if (projectId) {
       query = query.eq('project_id', projectId as string);

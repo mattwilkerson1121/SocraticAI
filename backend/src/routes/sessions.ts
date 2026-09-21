@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase';
 import { logger, logError } from '../logger';
 import { ApiError, CreateSessionRequest, AuthenticatedRequest } from '../types/index';
 import authMiddleware from '../middleware/auth';
+import { isSuperAdmin } from '../utils/roles';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ router.get('/', async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const { projectId, limit = 50, offset = 0 } = req.query;
 
-    logger.debug({ userId: user.id, projectId }, 'Fetching sessions');
+    logger.debug({ userId: user.id, projectId, role: user.role }, 'Fetching sessions');
 
     let query = supabaseAdmin
       .from('sessions')
@@ -29,8 +30,11 @@ router.get('/', async (req: Request, res: Response) => {
         messages(count)
       `,
         { count: 'exact' }
-      )
-      .eq('user_id', user.id);
+      );
+
+    if (!isSuperAdmin(user.role)) {
+      query = query.eq('user_id', user.id);
+    }
 
     // Filter by project if provided
     if (projectId) {

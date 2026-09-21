@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
+import { validateLoginCredentials } from '../utils/credentials';
 
 /**
  * Login Page Component
@@ -27,8 +28,14 @@ export function LoginPage() {
     e.preventDefault();
     setError(null);
 
+    const validationError = validateLoginCredentials(formData.email, formData.password);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     try {
-      await login(formData.email, formData.password);
+      await login(formData.email.trim(), formData.password);
       navigate('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -48,6 +55,7 @@ export function LoginPage() {
         <form
           onSubmit={handleSubmit}
           className="bg-neutral-800 rounded-xl p-2xl shadow-2xl border border-neutral-700"
+          noValidate
         >
           {/* Error Alert */}
           {error && (
@@ -68,13 +76,14 @@ export function LoginPage() {
               value={formData.email}
               onChange={handleChange}
               placeholder="you@example.com"
+              autoComplete="username"
               required
               className="w-full px-lg py-md bg-neutral-700 border border-neutral-600 rounded-lg text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition"
             />
           </div>
 
           {/* Password Field */}
-          <div className="mb-2xl">
+          <div className="mb-lg">
             <label htmlFor="password" className="block text-sm font-medium text-neutral-200 mb-sm">
               Password
             </label>
@@ -85,9 +94,13 @@ export function LoginPage() {
               value={formData.password}
               onChange={handleChange}
               placeholder="••••••••"
+              autoComplete="current-password"
               required
               className="w-full px-lg py-md bg-neutral-700 border border-neutral-600 rounded-lg text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition"
             />
+            <p className="mt-sm text-xs text-neutral-400">
+              Min 8 characters, upper &amp; lowercase, at least 2 numbers, and one of # $ % ^ &amp; * ( ) - _
+            </p>
           </div>
 
           {/* Submit Button */}

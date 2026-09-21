@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { supabaseAdmin } from '../config/supabase';
+import { supabaseAdmin, supabaseClient } from '../config/supabase';
 import { logger, logError } from '../logger';
 import { ApiError, AuthPayload, AuthResponse } from '../types/index';
 import authMiddleware from '../middleware/auth';
+import { validateLoginCredentials, validatePassword, validateEmail } from '../utils/credentials';
+import { resolveUserRole } from '../utils/roles';
 
 const router = Router();
 
@@ -19,12 +21,14 @@ router.post('/register', async (req: Request, res: Response) => {
       throw new ApiError(400, 'Email and password are required', 'MISSING_FIELDS');
     }
 
-    if (password.length < 8) {
-      throw new ApiError(400, 'Password must be at least 8 characters', 'WEAK_PASSWORD');
+    const emailError = validateEmail(email);
+    if (emailError) {
+      throw new ApiError(400, emailError, 'INVALID_EMAIL');
     }
 
-    if (!email.includes('@')) {
-      throw new ApiError(400, 'Invalid email format', 'INVALID_EMAIL');
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      throw new ApiError(400, passwordError, 'WEAK_PASSWORD');
     }
 
     logger.debug({ email }, 'Attempting user registration');
@@ -43,11 +47,21 @@ router.post('/register', async (req: Request, res: Response) => {
 
     const userId = authData.user.id;
 
+    // Ensure public.users row exists (FK for profiles/projects)
+    const { error: publicUserError } = await supabaseAdmin.from('users').upsert(
+      { id: userId, email },
+      { onConflict: 'id' }
+    );
+    if (publicUserError) {
+      logger.error({ userId, error: publicUserError }, 'Failed to create public user row');
+    }
+
     // Create user profile
     const { error: profileError } = await supabaseAdmin.from('user_profiles').insert({
       user_id: userId,
       name: email.split('@')[0], // Use email prefix as default name
       tier: 'free',
+      role: 'user',
     });
 
     if (profileError) {
@@ -149,26 +163,39 @@ router.post('/login', async (req: Request, res: Response) => {
       throw new ApiError(400, 'Email and password are required', 'MISSING_FIELDS');
     }
 
+    const credentialsError = validateLoginCredentials(email, password);
+    if (credentialsError) {
+      throw new ApiError(400, credentialsError, 'INVALID_CREDENTIALS_FORMAT');
+    }
+
     logger.debug({ email }, 'User login attempt');
 
-    // Authenticate with Supabase
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.signInWithPassword({
-      email,
+    // Authenticate with Supabase (anon client — password grant)
+    const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+      email: email.trim(),
       password,
     });
 
-    if (authError || !authData.session) {
+    if (authError || !authData.session || !authData.user) {
       logger.warn({ email }, 'Login failed - invalid credentials');
       throw new ApiError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
     }
 
-    logger.info({ userId: authData.user.id, email }, 'User login successful');
+    const role = await resolveUserRole(
+      authData.user.id,
+      authData.user.user_metadata as Record<string, unknown>
+    );
+
+    logger.info({ userId: authData.user.id, email, role }, 'User login successful');
 
     const response: AuthResponse = {
       user: {
         id: authData.user.id,
         email: authData.user.email || '',
-        user_metadata: authData.user.user_metadata,
+        user_metadata: {
+          ...authData.user.user_metadata,
+          role,
+        },
       },
       session: {
         access_token: authData.session.access_token,
@@ -259,7 +286,15 @@ router.get('/me', authMiddleware, async (req: Request, res: Response) => {
       throw new ApiError(404, 'User profile not found', 'NOT_FOUND');
     }
 
-    res.status(200).json(profile);
+    const role = await resolveUserRole(user.id, { role: profile.role });
+
+    res.status(200).json({
+      id: user.id,
+      email: user.email,
+      name: profile.name,
+      tier: profile.tier,
+      role,
+    });
   } catch (error) {
     if (error instanceof ApiError) {
       return void res.status(error.statusCode).json({

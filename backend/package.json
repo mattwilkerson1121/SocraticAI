@@ -13,7 +13,8 @@
     "format": "prettier --write src",
     "db:migrate": "supabase migration list",
     "db:push": "supabase db push",
-    "db:pull": "supabase db pull"
+    "db:pull": "supabase db pull",
+    "seed:super-admin": "tsx src/scripts/seed-super-admin.ts"
   },
   "keywords": [
     "socratic",

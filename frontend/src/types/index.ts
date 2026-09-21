@@ -12,7 +12,10 @@ export type User = {
   email: string;
   name?: string;
   tier: SubscriptionTier;
+  role: UserRole;
 };
+
+export type UserRole = 'user' | 'super_admin';
 
 export type SubscriptionTier = 'free' | 'strategist' | 'stoics';
 
@@ -80,6 +83,11 @@ export type AuthResponse = {
   user: {
     id: string;
     email: string;
+    user_metadata?: {
+      role?: UserRole;
+      name?: string;
+      [key: string]: unknown;
+    };
   };
   session: {
     access_token: string;

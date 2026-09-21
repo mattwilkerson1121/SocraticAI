@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { ApiError, AuthenticatedRequest } from '../types/index';
 import { logError, logger } from '../logger';
+import { isSuperAdmin, resolveUserRole } from '../utils/roles';
 
 /**
  * JWT payload from Supabase
@@ -130,11 +131,14 @@ export async function authMiddleware(
       }
     }
 
+    const role = await resolveUserRole(user.id, user.user_metadata as Record<string, unknown>);
+
     // Attach user to request
     (req as AuthenticatedRequest).user = {
       id: user.id,
       email: user.email || '',
       aud: 'authenticated',
+      role,
     };
 
     next();
@@ -187,10 +191,12 @@ export async function optionalAuthMiddleware(
     } = await supabaseAdmin.auth.admin.getUserById(extractUserIdFromToken(token));
 
     if (user) {
+      const role = await resolveUserRole(user.id, user.user_metadata as Record<string, unknown>);
       (req as AuthenticatedRequest).user = {
         id: user.id,
         email: user.email || '',
         aud: 'authenticated',
+        role,
       };
     }
 
@@ -231,6 +237,11 @@ export function requireTier(allowedTiers: string[]) {
 
       if (!user) {
         throw new ApiError(401, 'Authentication required', 'MISSING_AUTH');
+      }
+
+      // Super Admin bypasses subscription tier gates
+      if (isSuperAdmin(user.role)) {
+        return next();
       }
 
       // Fetch user's subscription tier

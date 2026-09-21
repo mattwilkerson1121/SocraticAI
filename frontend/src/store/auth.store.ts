@@ -32,7 +32,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           id: response.user.id,
           email: response.user.email,
           name: response.user.email.split('@')[0],
-          tier: 'free', // Default tier
+          tier: 'free',
+          role: (response.user.user_metadata?.role as 'user' | 'super_admin') || 'user',
         },
         isAuthenticated: true,
         accessToken: response.session.access_token,
@@ -62,6 +63,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           email: response.user.email,
           name: response.user.email.split('@')[0],
           tier: 'free',
+          role: 'user',
         },
         isAuthenticated: true,
         accessToken: response.session.access_token,
