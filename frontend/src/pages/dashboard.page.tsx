@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProjectsStore } from '../store/projects.store';
 import { useChatStore } from '../store/chat.store';
 import { useAuthStore } from '../store/auth.store';
+import { getApiErrorMessage } from '../services/api.client';
 
 /**
  * Dashboard Page Component
@@ -18,6 +19,7 @@ export function DashboardPage() {
   const [showNewProjectForm, setShowNewProjectForm] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchProjects();
@@ -31,6 +33,7 @@ export function DashboardPage() {
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
+    setActionError(null);
     try {
       const newProject = await createProject({
         name: projectName,
@@ -41,16 +44,17 @@ export function DashboardPage() {
       setProjectDescription('');
       setShowNewProjectForm(false);
     } catch (error) {
-      console.error('Failed to create project:', error);
+      setActionError(getApiErrorMessage(error, 'Failed to create project'));
     }
   };
 
   const handleCreateSession = async (projectId: string) => {
+    setActionError(null);
     try {
       const newSession = await createSession(projectId, `Session ${new Date().toLocaleString()}`);
       navigate(`/chat/${newSession.id}`);
     } catch (error) {
-      console.error('Failed to create session:', error);
+      setActionError(getApiErrorMessage(error, 'Failed to create session'));
     }
   };
 
@@ -78,6 +82,11 @@ export function DashboardPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-2xl py-3xl">
+        {actionError && (
+          <div className="mb-xl bg-error/10 border border-error/30 text-error px-lg py-md rounded-lg text-sm">
+            {actionError}
+          </div>
+        )}
         {/* Projects Section */}
         <div className="mb-3xl">
           <div className="flex justify-between items-center mb-2xl">

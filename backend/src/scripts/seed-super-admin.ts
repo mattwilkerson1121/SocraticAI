@@ -136,6 +136,23 @@ async function seed() {
     }
   }
 
+  // Ensure a default project exists
+  const { data: existingProjects } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1);
+
+  if (!existingProjects || existingProjects.length === 0) {
+    const { error: projectError } = await supabase.from('projects').insert({
+      user_id: userId,
+      name: 'My First Project',
+      description: 'Default project for your Socratic sessions',
+    });
+    if (projectError) throw projectError;
+    console.log('✓ Default project created');
+  }
+
   console.log(`✓ Super Admin ready: ${email} (${userId})`);
 }
 

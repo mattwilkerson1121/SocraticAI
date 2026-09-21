@@ -6,6 +6,7 @@ import authMiddleware from '../middleware/auth';
 import { OpenAIService } from '../services/openai.service';
 import { DocumentService } from '../services/document.service';
 import { getTaskQueue } from '../queue/task.queue';
+import { isSuperAdmin } from '../utils/roles';
 
 const router = Router();
 
@@ -22,13 +23,12 @@ router.get('/session/:sessionId', async (req: Request, res: Response) => {
     const { sessionId } = req.params;
     const { limit = 100, offset = 0 } = req.query;
 
-    // Verify session ownership
-    const { data: session, error: sessionError } = await supabaseAdmin
-      .from('sessions')
-      .select('id')
-      .eq('id', sessionId)
-      .eq('user_id', user.id)
-      .single();
+    // Verify session ownership (Super Admin can access any)
+    let sessionQuery = supabaseAdmin.from('sessions').select('id').eq('id', sessionId);
+    if (!isSuperAdmin(user.role)) {
+      sessionQuery = sessionQuery.eq('user_id', user.id);
+    }
+    const { data: session, error: sessionError } = await sessionQuery.single();
 
     if (sessionError || !session) {
       throw new ApiError(404, 'Session not found', 'NOT_FOUND');
@@ -105,13 +105,15 @@ router.post('/', async (req: Request, res: Response) => {
       throw new ApiError(400, 'Message too long (max 10000 characters)', 'CONTENT_TOO_LONG');
     }
 
-    // Verify session ownership
-    const { data: session, error: sessionError } = await supabaseAdmin
+    // Verify session ownership (Super Admin can access any)
+    let sessionQuery = supabaseAdmin
       .from('sessions')
       .select('id, project_id')
-      .eq('id', sessionId)
-      .eq('user_id', user.id)
-      .single();
+      .eq('id', sessionId);
+    if (!isSuperAdmin(user.role)) {
+      sessionQuery = sessionQuery.eq('user_id', user.id);
+    }
+    const { data: session, error: sessionError } = await sessionQuery.single();
 
     if (sessionError || !session) {
       throw new ApiError(404, 'Session not found', 'NOT_FOUND');
@@ -289,13 +291,12 @@ router.post('/:messageId/stream', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verify session
-    const { data: session } = await supabaseAdmin
-      .from('sessions')
-      .select('id')
-      .eq('id', sessionId)
-      .eq('user_id', user.id)
-      .single();
+    // Verify session (Super Admin can access any)
+    let sessionQuery = supabaseAdmin.from('sessions').select('id').eq('id', sessionId);
+    if (!isSuperAdmin(user.role)) {
+      sessionQuery = sessionQuery.eq('user_id', user.id);
+    }
+    const { data: session } = await sessionQuery.single();
 
     if (!session) {
       res.write('data: {"error": "Session not found"}\n\n');

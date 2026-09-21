@@ -146,12 +146,13 @@ router.get('/:projectId', async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const { projectId } = req.params;
 
-    const { data: project, error } = await supabaseAdmin
-      .from('projects')
-      .select('*')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
+    const { data: project, error } = await (() => {
+      let q = supabaseAdmin.from('projects').select('*').eq('id', projectId);
+      if (!isSuperAdmin(user.role)) {
+        q = q.eq('user_id', user.id);
+      }
+      return q.single();
+    })();
 
     if (error || !project) {
       throw new ApiError(404, 'Project not found', 'NOT_FOUND');

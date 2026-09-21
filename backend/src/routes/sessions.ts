@@ -17,7 +17,8 @@ router.use(authMiddleware);
 router.get('/', async (req: Request, res: Response) => {
   try {
     const user = (req as AuthenticatedRequest).user;
-    const { projectId, limit = 50, offset = 0 } = req.query;
+    const { limit = 50, offset = 0 } = req.query;
+    const projectId = (req.query.project_id || req.query.projectId) as string | undefined;
 
     logger.debug({ userId: user.id, projectId, role: user.role }, 'Fetching sessions');
 
@@ -38,7 +39,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Filter by project if provided
     if (projectId) {
-      query = query.eq('project_id', projectId as string);
+      query = query.eq('project_id', projectId);
     }
 
     const { data: sessions, error, count } = await query
@@ -104,13 +105,12 @@ router.post('/', async (req: Request, res: Response) => {
       throw new ApiError(400, 'Title too long (max 255 characters)', 'TITLE_TOO_LONG');
     }
 
-    // Verify project exists and belongs to user
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from('projects')
-      .select('id')
-      .eq('id', project_id)
-      .eq('user_id', user.id)
-      .single();
+    // Verify project exists (owner-scoped unless Super Admin)
+    let projectQuery = supabaseAdmin.from('projects').select('id').eq('id', project_id);
+    if (!isSuperAdmin(user.role)) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    const { data: project, error: projectError } = await projectQuery.single();
 
     if (projectError || !project) {
       throw new ApiError(404, 'Project not found', 'PROJECT_NOT_FOUND');
@@ -171,12 +171,11 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const { sessionId } = req.params;
 
-    const { data: session, error } = await supabaseAdmin
-      .from('sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .eq('user_id', user.id)
-      .single();
+    let sessionQuery = supabaseAdmin.from('sessions').select('*').eq('id', sessionId);
+    if (!isSuperAdmin(user.role)) {
+      sessionQuery = sessionQuery.eq('user_id', user.id);
+    }
+    const { data: session, error } = await sessionQuery.single();
 
     if (error || !session) {
       throw new ApiError(404, 'Session not found', 'NOT_FOUND');
@@ -224,13 +223,12 @@ router.put('/:sessionId', async (req: Request, res: Response) => {
       throw new ApiError(400, 'Title too long (max 255 characters)', 'TITLE_TOO_LONG');
     }
 
-    // Verify session ownership
-    const { data: session, error: fetchError } = await supabaseAdmin
-      .from('sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .eq('user_id', user.id)
-      .single();
+    // Verify session ownership (Super Admin can update any)
+    let sessionQuery = supabaseAdmin.from('sessions').select('*').eq('id', sessionId);
+    if (!isSuperAdmin(user.role)) {
+      sessionQuery = sessionQuery.eq('user_id', user.id);
+    }
+    const { data: session, error: fetchError } = await sessionQuery.single();
 
     if (fetchError || !session) {
       throw new ApiError(404, 'Session not found', 'NOT_FOUND');
@@ -290,13 +288,12 @@ router.delete('/:sessionId', async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const { sessionId } = req.params;
 
-    // Verify session ownership
-    const { data: session, error: fetchError } = await supabaseAdmin
-      .from('sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .eq('user_id', user.id)
-      .single();
+    // Verify session ownership (Super Admin can delete any)
+    let sessionQuery = supabaseAdmin.from('sessions').select('*').eq('id', sessionId);
+    if (!isSuperAdmin(user.role)) {
+      sessionQuery = sessionQuery.eq('user_id', user.id);
+    }
+    const { data: session, error: fetchError } = await sessionQuery.single();
 
     if (fetchError || !session) {
       throw new ApiError(404, 'Session not found', 'NOT_FOUND');
