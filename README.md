@@ -67,6 +67,9 @@ cp .env
 ```
 
 ### Step 2: Configure Supabase
+For setup we are using OpenAI because we already have an API key. 
+You can setup whatever LLM Provider API key you may have, wrappers are embedded
+for Anthropic, OpenAI, Gemini, and CoPilot in this initial version of the application
 
 1. Go to https://supabase.com and create a new project
 2. In Project Settings, copy:
