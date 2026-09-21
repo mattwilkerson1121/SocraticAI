@@ -101,20 +101,21 @@ router.post('/register', async (req: Request, res: Response) => {
 
     logger.info({ userId, email }, 'User registered successfully');
 
-    // Generate session
-    const { data: sessionData, error: sessionError } = await supabaseAdmin.auth.admin.createSession(
-      userId
-    );
+    // Sign in to obtain a session (admin createSession is not available in this SDK)
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
 
-    if (sessionError || !sessionData.session) {
-      throw new ApiError(500, 'Failed to create session', 'SESSION_ERROR');
+    if (sessionError || !sessionData.session || !sessionData.user) {
+      throw new ApiError(500, 'Account created but failed to start session. Please log in.', 'SESSION_ERROR');
     }
 
     const response: AuthResponse = {
       user: {
-        id: authData.user.id,
-        email: authData.user.email || '',
-        user_metadata: authData.user.user_metadata,
+        id: sessionData.user.id,
+        email: sessionData.user.email || '',
+        user_metadata: sessionData.user.user_metadata,
       },
       session: {
         access_token: sessionData.session.access_token,

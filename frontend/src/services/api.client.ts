@@ -22,7 +22,7 @@ export class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
 
-  constructor(baseURL: string = 'http://localhost:5000') {
+  constructor(baseURL: string = 'http://localhost:5001') {
     this.client = axios.create({
       baseURL,
       headers: {
@@ -328,12 +328,25 @@ export class ApiClient {
  */
 let apiClientInstance: ApiClient | null = null;
 
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { error?: { message?: string }; message?: string } | undefined;
+    return data?.error?.message || data?.message || error.message || fallback;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export function getApiClient(): ApiClient {
   if (!apiClientInstance) {
-    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
     apiClientInstance = new ApiClient(baseURL);
   }
   return apiClientInstance;
 }
+
+export { getApiErrorMessage };
 
 export default getApiClient;

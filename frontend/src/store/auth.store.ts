@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { User, AuthState } from '../types/index';
-import { getApiClient } from '../services/api.client';
+import { getApiClient, getApiErrorMessage } from '../services/api.client';
 
 /**
  * Auth Store - manages user authentication state
@@ -41,13 +41,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isLoading: false,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Login failed';
       set({
         isLoading: false,
         user: null,
         isAuthenticated: false,
       });
-      throw new Error(message);
+      throw new Error(getApiErrorMessage(error, 'Login failed'));
     }
   },
 
@@ -63,7 +62,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           email: response.user.email,
           name: response.user.email.split('@')[0],
           tier: 'free',
-          role: 'user',
+          role: (response.user.user_metadata?.role as 'user' | 'super_admin') || 'user',
         },
         isAuthenticated: true,
         accessToken: response.session.access_token,
@@ -71,13 +70,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isLoading: false,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Registration failed';
       set({
         isLoading: false,
         user: null,
         isAuthenticated: false,
       });
-      throw new Error(message);
+      throw new Error(getApiErrorMessage(error, 'Registration failed'));
     }
   },
 
