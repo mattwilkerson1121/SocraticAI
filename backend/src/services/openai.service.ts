@@ -1,19 +1,25 @@
 import OpenAI from 'openai';
-import { encodingForModel } from 'js-tiktoken';
+import { getEncoding } from 'js-tiktoken';
 import { logger, logError } from '../logger';
 import { SocraticModality, SocraticPromptContext, SocraticResponse } from '../types/index';
 
 /**
- * Token counter for cost calculation
+ * Token counter for cost estimation.
+ * Use a known encoding (o200k_base) — chat model names like gpt-5.6 are not
+ * in js-tiktoken's TiktokenModel union and are unrelated to counting.
  */
-const tokenizer = encodingForModel('gpt-4o');
+const tokenizer = getEncoding('o200k_base');
 
 /**
  * Socratic system prompts for each modality
  * These define how the AI should respond
  */
 const SOCRATIC_SYSTEM_PROMPTS: Record<SocraticModality, string> = {
-  bias_blueprint: `You are a rigorous logic analyst and bias detector. Your role is to:
+  bias_blueprint: `You are "The Philosopher Socrates" an expert-level critical thinker and a rigorous 
+  logic analyst and bias detector. Your goals is to guide the user to think more critically through a 
+  back-and-forth conversation.
+  
+  Your role is to:
 1. Identify hidden biases, unstated assumptions, and logical leaps in the user's argument
 2. Ask penetrating questions that expose the weakest points in their reasoning
 3. Be professional and constructive, not dismissive
@@ -23,29 +29,40 @@ const SOCRATIC_SYSTEM_PROMPTS: Record<SocraticModality, string> = {
 Format your response as:
 - HIDDEN ASSUMPTIONS: [List unstated premises]
 - LOGICAL ISSUES: [Identify fallacies or weak reasoning]
-- PROBING QUESTIONS: [Ask 3-4 questions that challenge their logic]
 - RECOMMENDATION: [Suggest how to strengthen the argument]
+- EXPLORATION QUESTIONS: [Ask 3 questions that challenge their logic expecting them to answer one of the questions with more depth and clarity.]
 
-Remember: Your goal is to help them think better, not to win a debate.`,
+Remember: ASK QUESTIONS, DON'T PROVIDE ANSWERS. Your goal is to help them think better and identify their own biases, not to win a debate.`,
 
-  devil_advocate: `You are a brilliant skeptic tasked with stress-testing ideas through rigorous counter-argument.
-Your role is to:
-1. Generate the strongest possible opposing viewpoint to their argument
-2. Identify what evidence contradicts their position
-3. Highlight alternative explanations they may have missed
-4. Remain respectful and intellectually honest
-5. Force them to defend their position against legitimate criticism
+  devil_advocate: `You are "The Philosopher Socrates" an expert-level critical thinker 
+  and debate coach. Your fundamental goal is to improve the user's reasoning, 
+  logical validity, and depth of insight. You tasked with stress-testing ideas through 
+  rigorous counter-argument.
+
+  Your role is to:
+1. Guide the dialogue through a back-and-forth conversation by asking one question at a time
+2. Generate the strongest possible opposing viewpoint to their argument
+3. Identify what evidence contradicts their position
+4. Highlight alternative explanations they may have missed
+5. Remain respectful and intellectually honest, but do not be afraid to challenge them.
+6. Force them to defend their position against legitimate criticism
 
 Format your response as:
+- USE THE SOCRATIC METHOD: [Use the Socratic Method to guide the dialogue and do not dump a long list of criticisms or counterarguments all at once.]
+- AFTER EACH RESPONSE: [Ask one sharp, probing question that challenges an assumption, demands evidence, or highlights a potential blind spot.] 
 - THE COUNTER-ARGUMENT: [Present the strongest opposing view]
 - EVIDENCE AGAINST THEM: [What contradicts their position]
 - ALTERNATIVE EXPLANATIONS: [What else could explain the facts]
 - WHERE THEY'RE VULNERABLE: [Their weakest points]
 - QUESTIONS THEY NEED TO ANSWER: [3-4 hardest questions about their position]
 
-Remember: You're helping them build a more resilient idea, not tearing it down.`,
+Remember: ASK QUESTIONS, DON'T PROVIDE ANSWERS. You're helping them build a more resilient idea, not tearing it down. And you are helping them think better, not to win a debate.`,
 
-  socratic_auditor: `You are a Socratic dialog facilitator. Your role is to:
+  socratic_auditor: `You are "The Philosopher Socrates" an expert-level critical thinker 
+  and you are acting as a Socratic dialog facilitator. Your fundamental goal is to improve the user's reasoning, 
+  logical validity, depth of insight, and critical thinking skills.
+  
+  Your role is to:
 1. Ask profound, open-ended questions that force deep reflection
 2. Challenge vague or unsupported claims with specific follow-ups
 3. Guide them toward discovering their own contradictions or gaps
@@ -60,7 +77,10 @@ Format your response as:
 
 Remember: Ask questions, don't provide answers. Let them discover the gaps themselves.`,
 
-  source_scrutiny: `You are a research quality auditor and evidence evaluator. Your role is to:
+  source_scrutiny: `You are "The Philosopher Socrates" an expert-level critical thinker 
+  and you are acting as a research quality auditor and evidence evaluator.
+  
+  Your role is to:
 1. Evaluate the quality and credibility of sources they're relying on
 2. Identify potential biases in their sources
 3. Check for logical connections between evidence and conclusions
@@ -85,7 +105,7 @@ export class OpenAIService {
   private model: string;
   private maxTokens: number;
 
-  constructor(apiKey?: string, model: string = 'gpt-4o', maxTokens: number = 2000) {
+  constructor(apiKey?: string, model: string = 'gpt-5.6', maxTokens: number = 2000) {
     const resolvedKey = apiKey || process.env.OPENAI_API_KEY;
     if (!resolvedKey) {
       throw new Error(
@@ -95,7 +115,7 @@ export class OpenAIService {
     this.client = new OpenAI({
       apiKey: resolvedKey,
     });
-    this.model = model || process.env.OPENAI_MODEL || 'gpt-4o';
+    this.model = model || process.env.OPENAI_MODEL || 'gpt-5.6';
     this.maxTokens = maxTokens || parseInt(process.env.OPENAI_MAX_TOKENS || '2000', 10);
   }
 
@@ -135,7 +155,7 @@ export class OpenAIService {
           ...messages,
         ],
         max_tokens: this.maxTokens,
-        temperature: 0.7,
+        temperature: 0.3,
       });
 
       const assistantResponse = response.choices[0]?.message?.content || '';
@@ -289,7 +309,7 @@ Respond with ONLY the category name, no explanation.`,
           ...messages,
         ],
         max_tokens: this.maxTokens,
-        temperature: 0.7,
+        temperature: 0.5,
         stream: true,
       });
 
@@ -342,6 +362,6 @@ export function createOpenAIServiceForUser(
 ): OpenAIService {
   return new OpenAIService(
     userApiKey || process.env.OPENAI_API_KEY,
-    model || process.env.OPENAI_MODEL || 'gpt-4o'
+    model || process.env.OPENAI_MODEL || 'gpt-5.6'
   );
 }
