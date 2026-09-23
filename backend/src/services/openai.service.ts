@@ -49,14 +49,14 @@ Remember: ASK QUESTIONS, DON'T PROVIDE ANSWERS. Your goal is to help them think 
 
 Format your response as:
 - USE THE SOCRATIC METHOD: [Use the Socratic Method to guide the dialogue and do not dump a long list of criticisms or counterarguments all at once.]
-- AFTER EACH RESPONSE: [Ask one sharp, probing question that challenges an assumption, demands evidence, or highlights a potential blind spot.] 
-- THE COUNTER-ARGUMENT: [Present the strongest opposing view]
-- EVIDENCE AGAINST THEM: [What contradicts their position]
-- ALTERNATIVE EXPLANATIONS: [What else could explain the facts]
-- WHERE THEY'RE VULNERABLE: [Their weakest points]
-- QUESTIONS THEY NEED TO ANSWER: [3-4 hardest questions about their position]
+- AFTER EACH RESPONSE: [Ask one sharp, probing question that challenges an assumption, demands evidence, or highlights a potential blind spot.]
+- IMPORTANT QUESTIONS TO CONSIDER : [3 hardest questions about their position]
 
 Remember: ASK QUESTIONS, DON'T PROVIDE ANSWERS. You're helping them build a more resilient idea, not tearing it down. And you are helping them think better, not to win a debate.`,
+// - THE COUNTER-ARGUMENT: [Present the strongest opposing view]
+//- EVIDENCE AGAINST THEM: [What contradicts their position]
+//- ALTERNATIVE EXPLANATIONS: [What else could explain the facts]
+//- WHERE THEY'RE VULNERABLE: [Their weakest points]
 
   socratic_auditor: `You are "The Philosopher Socrates" an expert-level critical thinker 
   and you are acting as a Socratic dialog facilitator. Your fundamental goal is to improve the user's reasoning, 
@@ -72,10 +72,10 @@ Remember: ASK QUESTIONS, DON'T PROVIDE ANSWERS. You're helping them build a more
 Format your response as:
 - INITIAL OBSERVATION: [What you noticed about their statement]
 - CORE QUESTION: [One fundamental question about their core claim]
-- FOLLOW-UP QUESTIONS: [3-4 sequential questions that build on their answer]
-- WHAT WE'RE EXPLORING: [Why these questions matter]
 
 Remember: Ask questions, don't provide answers. Let them discover the gaps themselves.`,
+// - FOLLOW-UP QUESTIONS: [3-4 sequential questions that build on their answer]
+//- WHAT WE'RE EXPLORING: [Why these questions matter]
 
   source_scrutiny: `You are "The Philosopher Socrates" an expert-level critical thinker 
   and you are acting as a research quality auditor and evidence evaluator.
@@ -120,6 +120,52 @@ export class OpenAIService {
   }
 
   /**
+   * Newer OpenAI models (gpt-5.*, o1/o3/o4) reject max_tokens and often only
+   * allow the default temperature. Build compatible request params.
+   */
+  private usesMaxCompletionTokens(): boolean {
+    const m = this.model.toLowerCase();
+    return (
+      m.startsWith('gpt-5') ||
+      m.startsWith('o1') ||
+      m.startsWith('o3') ||
+      m.startsWith('o4') ||
+      m.includes('gpt-5')
+    );
+  }
+
+  private buildChatParams(
+    extras: {
+      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      temperature?: number;
+      maxTokens?: number;
+      stream?: boolean;
+    }
+  ): Record<string, unknown> {
+    const params: Record<string, unknown> = {
+      model: this.model,
+      messages: extras.messages,
+    };
+
+    const limit = extras.maxTokens ?? this.maxTokens;
+    if (this.usesMaxCompletionTokens()) {
+      params.max_completion_tokens = limit;
+      // gpt-5 / reasoning models only accept default temperature
+    } else {
+      params.max_tokens = limit;
+      if (extras.temperature !== undefined) {
+        params.temperature = extras.temperature;
+      }
+    }
+
+    if (extras.stream) {
+      params.stream = true;
+    }
+
+    return params;
+  }
+
+  /**
    * Generate a Socratic response for the given context
    */
   async generateSocraticResponse(
@@ -131,32 +177,30 @@ export class OpenAIService {
           modality: context.modality,
           userStatementLength: context.userStatement.length,
           hasDocument: !!context.documentContext,
+          model: this.model,
         },
         'Generating Socratic response'
       );
 
       // Build messages array
-      const messages: Array<{ role: 'system' | 'user'; content: string }> = [
-        ...((context.previousMessages || []) as any),
+      const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        {
+          role: 'system',
+          content: SOCRATIC_SYSTEM_PROMPTS[context.modality],
+        },
+        ...((context.previousMessages || []) as Array<{
+          role: 'user' | 'assistant';
+          content: string;
+        }>),
         {
           role: 'user',
           content: this.buildUserPrompt(context),
         },
       ];
 
-      // Call OpenAI API
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: SOCRATIC_SYSTEM_PROMPTS[context.modality],
-          },
-          ...messages,
-        ],
-        max_tokens: this.maxTokens,
-        temperature: 0.3,
-      });
+      const response = await this.client.chat.completions.create(
+        this.buildChatParams({ messages, temperature: 0.3 }) as any
+      );
 
       const assistantResponse = response.choices[0]?.message?.content || '';
 
@@ -204,27 +248,28 @@ export class OpenAIService {
    */
   async classifyIntent(userStatement: string): Promise<SocraticModality> {
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert at understanding user intent. Classify the following user input into ONE of these categories:
+      const response = await this.client.chat.completions.create(
+        this.buildChatParams({
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at understanding user intent. Classify the following user input into ONE of these categories:
 - "bias_blueprint": When they want you to find hidden assumptions and logical flaws
 - "devil_advocate": When they want counter-arguments and alternative views
 - "socratic_auditor": When they want probing questions about their beliefs
 - "source_scrutiny": When they want evidence evaluated or sources critiqued
 
 Respond with ONLY the category name, no explanation.`,
-          },
-          {
-            role: 'user',
-            content: userStatement,
-          },
-        ],
-        max_tokens: 50,
-        temperature: 0.5,
-      });
+            },
+            {
+              role: 'user',
+              content: userStatement,
+            },
+          ],
+          temperature: 0.5,
+          maxTokens: 50,
+        }) as any
+      );
 
       const classification = (response.choices[0]?.message?.content || 'socratic_auditor')
         .toLowerCase()
@@ -299,19 +344,19 @@ Respond with ONLY the category name, no explanation.`,
         },
       ];
 
-      const stream = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: SOCRATIC_SYSTEM_PROMPTS[context.modality],
-          },
-          ...messages,
-        ],
-        max_tokens: this.maxTokens,
-        temperature: 0.5,
-        stream: true,
-      });
+      const stream = await this.client.chat.completions.create(
+        this.buildChatParams({
+          messages: [
+            {
+              role: 'system',
+              content: SOCRATIC_SYSTEM_PROMPTS[context.modality],
+            },
+            ...messages,
+          ],
+          temperature: 0.5,
+          stream: true,
+        }) as any
+      );
 
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || '';
@@ -333,16 +378,17 @@ Respond with ONLY the category name, no explanation.`,
    */
   async validateApiKey(): Promise<boolean> {
     try {
-      await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'user',
-            content: 'Say "OK" if you can hear me.',
-          },
-        ],
-        max_tokens: 10,
-      });
+      await this.client.chat.completions.create(
+        this.buildChatParams({
+          messages: [
+            {
+              role: 'user',
+              content: 'Say "OK" if you can hear me.',
+            },
+          ],
+          maxTokens: 10,
+        }) as any
+      );
 
       return true;
     } catch (error) {

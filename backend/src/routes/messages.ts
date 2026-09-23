@@ -267,11 +267,16 @@ router.post('/', async (req: Request, res: Response) => {
       userId: (req as AuthenticatedRequest).user.id,
     });
 
-    res.status(500).json({
+    const openAiMessage = error instanceof Error ? error.message : 'Failed to create message';
+    const statusCode = /unsupported parameter|unsupported value|invalid|model/i.test(openAiMessage)
+      ? 502
+      : 500;
+
+    res.status(statusCode).json({
       error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to create message',
-        statusCode: 500,
+        code: statusCode === 502 ? 'AI_PROVIDER_ERROR' : 'INTERNAL_ERROR',
+        message: openAiMessage || 'Failed to create message',
+        statusCode,
         timestamp: new Date().toISOString(),
       },
     });
