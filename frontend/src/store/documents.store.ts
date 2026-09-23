@@ -19,7 +19,7 @@ interface DocumentsStore {
   reset: () => void;
 }
 
-export const useDocumentsStore = create<DocumentsStore>((set, get) => ({
+export const useDocumentsStore = create<DocumentsStore>((set) => ({
   documents: [],
   selectedDocument: null,
   isLoading: false,

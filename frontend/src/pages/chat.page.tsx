@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store/chat.store';
 import { useDocumentsStore } from '../store/documents.store';
 import { useProjectsStore } from '../store/projects.store';
 import { useAuthStore } from '../store/auth.store';
 import { ChatSidebar } from '../components/chat-sidebar';
+import { ComposerAttachButton } from '../components/composer-attach-button';
+import { FileMethodPicker } from '../components/file-method-picker';
 import { SocraticModality } from '../types/index';
 import { getApiErrorMessage } from '../services/api.client';
+import { FILE_ANALYSIS_MODALITIES, FileTypeOption } from '../utils/file-types';
 
 const MODALITY_OPTIONS: {
   value: SocraticModality;
@@ -61,15 +64,32 @@ export function ChatPage() {
     deleteSession,
     clearError,
   } = useChatStore();
-  const { documents, fetchDocuments } = useDocumentsStore();
+  const { documents, fetchDocuments, uploadDocument, isUploading } = useDocumentsStore();
 
   const [messageInput, setMessageInput] = useState('');
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | undefined>();
-  const [showDocuments, setShowDocuments] = useState(false);
+  const [pendingMethodFile, setPendingMethodFile] = useState<{ id: string; filename: string } | null>(
+    null
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [fileAccept, setFileAccept] = useState('.pdf,.docx,.xlsx,.pptx,.txt,.md');
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const hasAttachedFile = Boolean(selectedDocumentId);
+  const availableModalities = useMemo(
+    () =>
+      hasAttachedFile
+        ? MODALITY_OPTIONS.filter((option) =>
+            (FILE_ANALYSIS_MODALITIES as readonly string[]).includes(option.value)
+          )
+        : MODALITY_OPTIONS,
+    [hasAttachedFile]
+  );
+
+  const attachedDocument = documents.find((doc) => doc.id === selectedDocumentId);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -113,18 +133,32 @@ export function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [messageInput]);
 
+  // File uploads cannot use Devil's Advocate — keep header selector in sync
+  useEffect(() => {
+    if (hasAttachedFile && currentModality === 'devil_advocate') {
+      setCurrentModality('socratic_auditor');
+    }
+  }, [hasAttachedFile, currentModality, setCurrentModality]);
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!messageInput.trim() || !sessionId || isGenerating) return;
+    if (isGenerating || !sessionId) return;
 
-    const content = messageInput.trim();
+    const trimmed = messageInput.trim();
+    if (!trimmed && !selectedDocumentId) return;
+
+    const content =
+      trimmed ||
+      `Please analyze the attached document "${attachedDocument?.filename || 'file'}" using the selected Socratic method.`;
+
     setMessageInput('');
+    const documentId = selectedDocumentId;
     setSelectedDocumentId(undefined);
     clearError();
     setActionError(null);
 
     try {
-      await sendMessage(content, selectedDocumentId);
+      await sendMessage(content, documentId);
     } catch (error) {
       setActionError(getApiErrorMessage(error, 'Failed to send message'));
     }
@@ -135,6 +169,49 @@ export function ChatPage() {
       e.preventDefault();
       void handleSendMessage();
     }
+  };
+
+  const handlePickFileType = (option: FileTypeOption) => {
+    setFileAccept(option.accept);
+    // Defer so accept attribute updates before the OS dialog opens
+    requestAnimationFrame(() => {
+      fileInputRef.current?.click();
+    });
+  };
+
+  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const projectId = currentSession?.project_id || currentProject?.id;
+    if (!projectId) {
+      setActionError('Select a project before uploading a file.');
+      return;
+    }
+
+    setActionError(null);
+    try {
+      const document = await uploadDocument(file, projectId);
+      setSelectedDocumentId(document.id);
+      setPendingMethodFile({ id: document.id, filename: document.filename });
+      if (currentModality === 'devil_advocate') {
+        setCurrentModality('socratic_auditor');
+      }
+    } catch (error) {
+      setActionError(getApiErrorMessage(error, 'Failed to upload file'));
+    }
+  };
+
+  const handleMethodChosen = (modality: SocraticModality) => {
+    setCurrentModality(modality);
+    setPendingMethodFile(null);
+    textareaRef.current?.focus();
+  };
+
+  const handleMethodCancel = () => {
+    setPendingMethodFile(null);
+    setSelectedDocumentId(undefined);
   };
 
   const handleNewChat = async () => {
@@ -179,8 +256,9 @@ export function ChatPage() {
   };
 
   const activeModality =
-    MODALITY_OPTIONS.find((m) => m.value === currentModality) || MODALITY_OPTIONS[2];
+    availableModalities.find((m) => m.value === currentModality) || availableModalities[0];
   const displayError = actionError || chatError;
+  const canSend = Boolean(messageInput.trim() || selectedDocumentId) && !isGenerating;
 
   return (
     <div className="flex h-screen bg-neutral-900 text-neutral-100">
@@ -221,12 +299,16 @@ export function ChatPage() {
           <label className="relative">
             <span className="sr-only">Mode</span>
             <select
-              value={currentModality}
+              value={
+                availableModalities.some((m) => m.value === currentModality)
+                  ? currentModality
+                  : availableModalities[0]?.value
+              }
               onChange={(e) => setCurrentModality(e.target.value as SocraticModality)}
-              title={activeModality.description}
+              title={activeModality?.description}
               className="appearance-none rounded-lg border border-neutral-700 bg-neutral-800 py-2 pl-3 pr-8 text-sm text-neutral-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
-              {MODALITY_OPTIONS.map((option) => (
+              {availableModalities.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -250,7 +332,8 @@ export function ChatPage() {
             <div className="flex h-full flex-col items-center justify-center px-6 text-center">
               <h2 className="mb-2 text-2xl font-semibold text-white">How can I challenge your thinking?</h2>
               <p className="max-w-md text-sm text-neutral-400">
-                Pick a mode above, then share a belief, strategy, or claim. SocraticAI will stress-test it.
+                Type a claim, or use + to upload a document for Bias Blueprint, Socratic Auditor, or
+                Source Scrutiny analysis.
               </p>
               <div className="mt-8 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
                 {MODALITY_OPTIONS.map((option) => (
@@ -320,53 +403,64 @@ export function ChatPage() {
 
         <div className="border-t border-neutral-800 bg-neutral-900 px-3 py-3 md:px-6 md:py-4">
           <form onSubmit={handleSendMessage} className="mx-auto w-full max-w-3xl">
-            {documents.length > 0 && (
-              <div className="mb-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDocuments(!showDocuments)}
-                  className="text-xs text-primary-400 hover:text-primary-300"
-                >
-                  Attach document {selectedDocumentId ? '✓' : ''}
-                </button>
-                {showDocuments && (
-                  <div className="mt-2 max-h-32 space-y-1 overflow-y-auto rounded-lg bg-neutral-800 p-2">
-                    {documents.map((doc) => (
-                      <button
-                        key={doc.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedDocumentId(doc.id);
-                          setShowDocuments(false);
-                        }}
-                        className={`block w-full rounded px-2 py-1.5 text-left text-sm ${
-                          selectedDocumentId === doc.id
-                            ? 'bg-primary-500 text-white'
-                            : 'text-neutral-200 hover:bg-neutral-700'
-                        }`}
-                      >
-                        {doc.filename}
-                      </button>
-                    ))}
-                  </div>
+            {attachedDocument && (
+              <div className="mb-2 flex items-center gap-2">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200">
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                    />
+                  </svg>
+                  <span className="truncate">{attachedDocument.filename}</span>
+                  <button
+                    type="button"
+                    aria-label="Remove file"
+                    onClick={() => setSelectedDocumentId(undefined)}
+                    className="rounded-full p-0.5 text-neutral-400 hover:bg-neutral-700 hover:text-white"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {hasAttachedFile && (
+                  <span className="text-[11px] text-neutral-500">
+                    Devil&apos;s Advocate unavailable for file analysis
+                  </span>
                 )}
               </div>
             )}
 
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept={fileAccept}
+              onChange={handleFileSelected}
+            />
+
             <div className="flex items-end gap-2 rounded-3xl border border-neutral-700 bg-neutral-800 px-3 py-2 shadow-lg focus-within:border-neutral-500">
+              <ComposerAttachButton
+                disabled={isGenerating}
+                isUploading={isUploading}
+                onPickType={handlePickFileType}
+              />
               <textarea
                 ref={textareaRef}
                 value={messageInput}
                 onChange={(e) => setMessageInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message SocraticAI…"
+                placeholder={hasAttachedFile ? 'Ask anything about this file…' : 'Ask anything'}
                 disabled={isGenerating}
                 rows={1}
                 className="max-h-[200px] min-h-[44px] flex-1 resize-none bg-transparent py-2.5 text-[15px] text-white placeholder-neutral-500 outline-none disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={isGenerating || !messageInput.trim()}
+                disabled={!canSend}
                 className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-neutral-900 transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:bg-neutral-600 disabled:text-neutral-400"
                 aria-label="Send message"
               >
@@ -381,17 +475,25 @@ export function ChatPage() {
                   </svg>
                 ) : (
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
                   </svg>
                 )}
               </button>
             </div>
             <p className="mt-2 text-center text-[11px] text-neutral-500">
-              Enter to send · Shift+Enter for a new line · Mode: {activeModality.label}
+              Enter to send · Shift+Enter for a new line · Mode: {activeModality?.label}
             </p>
           </form>
         </div>
       </div>
+
+      {pendingMethodFile && (
+        <FileMethodPicker
+          filename={pendingMethodFile.filename}
+          onSelect={handleMethodChosen}
+          onCancel={handleMethodCancel}
+        />
+      )}
     </div>
   );
 }

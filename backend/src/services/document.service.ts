@@ -14,7 +14,10 @@ export class DocumentService {
   private maxFileSize: number;
   private supportedTypes: string[];
 
-  constructor(maxFileSizeMB: number = 10, supportedTypes: string[] = ['pdf', 'docx', 'txt', 'md', 'json']) {
+  constructor(
+    maxFileSizeMB: number = 10,
+    supportedTypes: string[] = ['pdf', 'docx', 'txt', 'md', 'json', 'pptx', 'xlsx']
+  ) {
     this.maxFileSize = maxFileSizeMB * 1024 * 1024;
     this.supportedTypes = supportedTypes;
   }
@@ -194,6 +197,12 @@ export class DocumentService {
         case 'json':
           content = await this.parseJSON(fileData);
           break;
+        case 'xlsx':
+          content = await this.parseXLSX(fileData);
+          break;
+        case 'pptx':
+          content = await this.parsePPTX(fileData);
+          break;
         default:
           throw new ApiError(400, `Unsupported file type: ${document.file_type}`, 'UNSUPPORTED_TYPE');
       }
@@ -294,6 +303,77 @@ export class DocumentService {
   }
 
   /**
+   * Parse XLSX by extracting shared strings / cell text from the Office zip
+   */
+  private async parseXLSX(buffer: Buffer): Promise<string> {
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(buffer);
+      const shared = await zip.file('xl/sharedStrings.xml')?.async('string');
+      const texts: string[] = [];
+
+      if (shared) {
+        const matches = shared.matchAll(/<t[^>]*>([^<]*)<\/t>/g);
+        for (const match of matches) {
+          if (match[1]?.trim()) texts.push(match[1].trim());
+        }
+      }
+
+      // Fallback: pull readable text from worksheet XML
+      if (texts.length === 0) {
+        const sheets = Object.keys(zip.files).filter((n) => n.startsWith('xl/worksheets/'));
+        for (const sheet of sheets) {
+          const xml = await zip.file(sheet)?.async('string');
+          if (!xml) continue;
+          const matches = xml.matchAll(/<v>([^<]+)<\/v>/g);
+          for (const match of matches) {
+            if (match[1]?.trim()) texts.push(match[1].trim());
+          }
+        }
+      }
+
+      const content = texts.join(' ').trim();
+      if (!content) {
+        throw new Error('No extractable text');
+      }
+      return content;
+    } catch (error) {
+      throw new ApiError(500, 'Failed to parse XLSX', 'XLSX_PARSE_ERROR');
+    }
+  }
+
+  /**
+   * Parse PPTX by extracting text from slide XML
+   */
+  private async parsePPTX(buffer: Buffer): Promise<string> {
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(buffer);
+      const slides = Object.keys(zip.files)
+        .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+        .sort();
+
+      const texts: string[] = [];
+      for (const slide of slides) {
+        const xml = await zip.file(slide)?.async('string');
+        if (!xml) continue;
+        const matches = xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g);
+        for (const match of matches) {
+          if (match[1]?.trim()) texts.push(match[1].trim());
+        }
+      }
+
+      const content = texts.join('\n').trim();
+      if (!content) {
+        throw new Error('No extractable text');
+      }
+      return content;
+    } catch (error) {
+      throw new ApiError(500, 'Failed to parse PPTX', 'PPTX_PARSE_ERROR');
+    }
+  }
+
+  /**
    * Delete document and associated storage
    */
   async deleteDocument(documentId: string, userId: string): Promise<void> {
@@ -358,7 +438,18 @@ export class DocumentService {
   private isValidMimeType(mimeType: string, fileType: string): boolean {
     const mimeTypeMap: Record<string, string[]> = {
       pdf: ['application/pdf'],
-      docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      docx: [
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/octet-stream',
+      ],
+      xlsx: [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/octet-stream',
+      ],
+      pptx: [
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/octet-stream',
+      ],
       txt: ['text/plain'],
       md: ['text/plain', 'text/markdown', 'text/x-markdown'],
       json: ['application/json'],
@@ -423,6 +514,6 @@ export class DocumentService {
 export function createDocumentService(): DocumentService {
   return new DocumentService(
     parseInt(process.env.MAX_FILE_SIZE_MB || '10'),
-    (process.env.SUPPORTED_FILE_TYPES || 'pdf,docx,txt,md,json').split(',')
+    (process.env.SUPPORTED_FILE_TYPES || 'pdf,docx,txt,md,json,pptx,xlsx').split(',')
   );
 }

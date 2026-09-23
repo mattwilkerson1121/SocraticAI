@@ -63,7 +63,7 @@ export type Document = {
   project_id: string;
   filename: string;
   file_path: string;
-  file_type: 'pdf' | 'docx' | 'txt' | 'md' | 'json';
+  file_type: 'pdf' | 'docx' | 'txt' | 'md' | 'json' | 'pptx' | 'xlsx';
   size: number;
   mime_type: string;
   uploaded_at: string;

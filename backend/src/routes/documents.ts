@@ -16,7 +16,18 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024, // 10MB
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown', 'application/json'];
+    const allowedTypes = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'text/markdown',
+      'text/x-markdown',
+      'application/json',
+      // Some browsers send empty or octet-stream for Office files
+      'application/octet-stream',
+    ];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -47,13 +58,12 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       throw new ApiError(400, 'Project ID is required', 'MISSING_PROJECT_ID');
     }
 
-    // Verify project ownership
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from('projects')
-      .select('id')
-      .eq('id', projectId)
-      .eq('user_id', user.id)
-      .single();
+    // Verify project exists (Super Admin can upload to any project)
+    let projectQuery = supabaseAdmin.from('projects').select('id').eq('id', projectId);
+    if (!isSuperAdmin(user.role)) {
+      projectQuery = projectQuery.eq('user_id', user.id);
+    }
+    const { data: project, error: projectError } = await projectQuery.single();
 
     if (projectError || !project) {
       throw new ApiError(404, 'Project not found', 'PROJECT_NOT_FOUND');

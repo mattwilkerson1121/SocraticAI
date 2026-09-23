@@ -77,7 +77,7 @@ export type SocraticModality =
   | 'socratic_auditor'
   | 'source_scrutiny';
 
-export type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'md' | 'json';
+export type SupportedFileType = 'pdf' | 'docx' | 'txt' | 'md' | 'json' | 'pptx' | 'xlsx';
 
 // ==========================================
 // API REQUEST/RESPONSE TYPES
