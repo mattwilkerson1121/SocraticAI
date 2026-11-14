@@ -8,6 +8,37 @@ import { logger, logError } from '../logger';
 import { DocumentRecord, SupportedFileType, ApiError } from '../types/index';
 
 /**
+ * Supabase Storage `download()` resolves to a Blob (including on Node).
+ * pdf-parse, mammoth, and the text parsers require a Node Buffer.
+ * Passing the Blob through makes PDF/DOCX/Office parses throw and makes
+ * text/markdown parsers return the literal string "[object Blob]".
+ */
+export async function fileBodyToBuffer(body: unknown): Promise<Buffer> {
+  if (Buffer.isBuffer(body)) {
+    return body;
+  }
+
+  if (body instanceof ArrayBuffer) {
+    return Buffer.from(body);
+  }
+
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+  }
+
+  if (
+    body !== null &&
+    typeof body === 'object' &&
+    typeof (body as Blob).arrayBuffer === 'function'
+  ) {
+    const bytes = await (body as Blob).arrayBuffer();
+    return Buffer.from(bytes);
+  }
+
+  throw new ApiError(500, 'Failed to read document bytes', 'DOWNLOAD_ERROR');
+}
+
+/**
  * Document service for handling file uploads and parsing
  */
 export class DocumentService {
@@ -178,30 +209,32 @@ export class DocumentService {
         throw new ApiError(500, 'Failed to download document', 'DOWNLOAD_ERROR');
       }
 
+      const fileBuffer = await fileBodyToBuffer(fileData);
+
       // Parse based on file type
       let content: string;
 
       switch (document.file_type) {
         case 'pdf':
-          content = await this.parsePDF(fileData);
+          content = await this.parsePDF(fileBuffer);
           break;
         case 'docx':
-          content = await this.parseDOCX(fileData);
+          content = await this.parseDOCX(fileBuffer);
           break;
         case 'txt':
-          content = await this.parseTXT(fileData);
+          content = await this.parseTXT(fileBuffer);
           break;
         case 'md':
-          content = await this.parseMD(fileData);
+          content = await this.parseMD(fileBuffer);
           break;
         case 'json':
-          content = await this.parseJSON(fileData);
+          content = await this.parseJSON(fileBuffer);
           break;
         case 'xlsx':
-          content = await this.parseXLSX(fileData);
+          content = await this.parseXLSX(fileBuffer);
           break;
         case 'pptx':
-          content = await this.parsePPTX(fileData);
+          content = await this.parsePPTX(fileBuffer);
           break;
         default:
           throw new ApiError(400, `Unsupported file type: ${document.file_type}`, 'UNSUPPORTED_TYPE');
