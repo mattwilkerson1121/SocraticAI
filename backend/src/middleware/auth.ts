@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabaseAdmin } from '../config/supabase';
+import { supabaseAdmin, supabaseClient } from '../config/supabase';
 import { ApiError, AuthenticatedRequest } from '../types/index';
 import { logError, logger } from '../logger';
 import { isSuperAdmin, resolveUserRole } from '../utils/roles';
@@ -29,38 +29,6 @@ function extractToken(authHeader?: string): string | null {
   }
 
   return parts[1];
-}
-
-/**
- * Verify JWT token with Supabase
- */
-async function verifyToken(token: string): Promise<JWTPayload | null> {
-  try {
-    const {
-      data: { user },
-      error,
-    } = await supabaseAdmin.auth.admin.getUserById(
-      // Extract user ID from token via Supabase
-      // This is a workaround; in production, use jwt.verify() with secret
-      token
-    );
-
-    if (error || !user) {
-      return null;
-    }
-
-    return {
-      sub: user.id,
-      email: user.email || '',
-      aud: 'authenticated',
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 3600,
-      email_verified: user.email_confirmed_at !== null,
-      user_metadata: user.user_metadata,
-    };
-  } catch (error) {
-    return null;
-  }
 }
 
 /**
@@ -98,15 +66,10 @@ export async function authMiddleware(
       throw new ApiError(401, 'Missing authorization token', 'MISSING_TOKEN');
     }
 
-    // Get user from token via Supabase
-    const {
-      data: { user },
-      error,
-    } = await supabaseAdmin.auth.admin.getUserById(
-      // Parse JWT without verification for MVP
-      // In production, verify with secret
-      extractUserIdFromToken(token)
-    );
+    // Auth server checks the signature, expiry, and session. Do not decode
+    // the payload locally: getUserById(sub) would trust any forged user id.
+    const { data, error } = await supabaseClient.auth.getUser(token);
+    const user = data?.user;
 
     if (error || !user) {
       throw new ApiError(401, 'Invalid token', 'INVALID_TOKEN');
@@ -131,7 +94,7 @@ export async function authMiddleware(
       }
     }
 
-    const role = await resolveUserRole(user.id, user.user_metadata as Record<string, unknown>);
+    const role = await resolveUserRole(user.id);
 
     // Attach user to request
     (req as AuthenticatedRequest).user = {
@@ -186,12 +149,11 @@ export async function optionalAuthMiddleware(
       return next();
     }
 
-    const {
-      data: { user },
-    } = await supabaseAdmin.auth.admin.getUserById(extractUserIdFromToken(token));
+    const { data, error } = await supabaseClient.auth.getUser(token);
+    const user = !error ? data?.user : null;
 
     if (user) {
-      const role = await resolveUserRole(user.id, user.user_metadata as Record<string, unknown>);
+      const role = await resolveUserRole(user.id);
       (req as AuthenticatedRequest).user = {
         id: user.id,
         email: user.email || '',
@@ -205,25 +167,6 @@ export async function optionalAuthMiddleware(
     // If auth fails, continue as anonymous
     logger.debug({ error }, 'optionalAuthMiddleware: auth failed, continuing as anonymous');
     next();
-  }
-}
-
-/**
- * Extract user ID from JWT token (basic parsing for MVP)
- * In production, verify with jwt.verify()
- */
-function extractUserIdFromToken(token: string): string {
-  try {
-    // Decode JWT payload (without verification)
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      throw new Error('Invalid JWT format');
-    }
-
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-    return payload.sub || payload.user_id;
-  } catch (error) {
-    throw new ApiError(401, 'Failed to parse token', 'TOKEN_PARSE_ERROR');
   }
 }
 

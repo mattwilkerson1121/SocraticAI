@@ -182,10 +182,7 @@ router.post('/login', async (req: Request, res: Response) => {
       throw new ApiError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
     }
 
-    const role = await resolveUserRole(
-      authData.user.id,
-      authData.user.user_metadata as Record<string, unknown>
-    );
+    const role = await resolveUserRole(authData.user.id);
 
     logger.info({ userId: authData.user.id, email, role }, 'User login successful');
 
@@ -287,7 +284,7 @@ router.get('/me', authMiddleware, async (req: Request, res: Response) => {
       throw new ApiError(404, 'User profile not found', 'NOT_FOUND');
     }
 
-    const role = await resolveUserRole(user.id, { role: profile.role });
+    const role = await resolveUserRole(user.id);
 
     res.status(200).json({
       id: user.id,
