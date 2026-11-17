@@ -8,6 +8,10 @@ import { DocumentService } from '../services/document.service';
 import { getTaskQueue } from '../queue/task.queue';
 import { isSuperAdmin } from '../utils/roles';
 import { resolveOpenAICredentials } from '../utils/openai-credentials';
+import {
+  chronologicalFromNewestFirst,
+  RECENT_CONTEXT_LIMIT,
+} from '../utils/recent-messages';
 
 const router = Router();
 
@@ -177,18 +181,21 @@ router.post('/', async (req: Request, res: Response) => {
       documentContext = await docService.parseDocument(documentId, user.id);
     }
 
-    // Get previous messages for context
+    // Newest rows first: an ascending order plus LIMIT returns the oldest page,
+    // so a long session would keep feeding the model its opening turns.
     const { data: previousMessages } = await supabaseAdmin
       .from('messages')
-      .select('*')
+      .select('role, content')
       .eq('session_id', sessionId)
-      .order('created_at', { ascending: true })
-      .limit(10); // Last 10 messages for context
+      .order('created_at', { ascending: false })
+      .limit(RECENT_CONTEXT_LIMIT);
 
-    const previousMessagesFormatted = (previousMessages || []).slice(-5).map((msg: any) => ({
-      role: msg.role as 'user' | 'assistant',
-      content: msg.content,
-    }));
+    const previousMessagesFormatted = chronologicalFromNewestFirst(
+      (previousMessages || []).map((msg: { role: string; content: string }) => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      }))
+    );
 
     // Generate Socratic response
     const socraticResponse = await aiService.generateSocraticResponse({
