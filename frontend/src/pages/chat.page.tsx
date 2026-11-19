@@ -57,6 +57,7 @@ export function ChatPage() {
     error: chatError,
     fetchMessages,
     fetchSessions,
+    activateSession,
     getSession,
     sendMessage,
     setCurrentModality,
@@ -93,6 +94,8 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!sessionId) return;
+
+    activateSession(sessionId);
 
     let cancelled = false;
     (async () => {

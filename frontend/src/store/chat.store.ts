@@ -14,6 +14,8 @@ function isDefaultSessionTitle(title: string): boolean {
 
 interface ChatStore {
   sessions: Session[];
+  /** Session the UI is showing. Set synchronously on navigation so in-flight loads cannot land on another chat. */
+  activeSessionId: string | null;
   currentSession: Session | null;
   messages: Message[];
   isLoadingSessions: boolean;
@@ -23,6 +25,7 @@ interface ChatStore {
   currentModality: SocraticModality;
 
   fetchSessions: (projectId: string) => Promise<void>;
+  activateSession: (sessionId: string) => void;
   createSession: (projectId: string, title?: string) => Promise<Session>;
   getSession: (sessionId: string) => Promise<Session | null>;
   updateSession: (sessionId: string, title: string) => Promise<Session>;
@@ -39,6 +42,7 @@ interface ChatStore {
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: [],
+  activeSessionId: null,
   currentSession: null,
   messages: [],
   isLoadingSessions: false,
@@ -61,6 +65,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
+  activateSession: (sessionId: string) => {
+    set((state) => {
+      if (state.activeSessionId === sessionId) {
+        return state;
+      }
+      return {
+        activeSessionId: sessionId,
+        currentSession: null,
+        messages: [],
+        isGenerating: false,
+        error: null,
+      };
+    });
+  },
+
   createSession: async (projectId: string, title = 'New chat') => {
     set({ isLoadingSessions: true, error: null });
     try {
@@ -72,6 +91,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
       set((state) => ({
         sessions: [session, ...state.sessions.filter((s) => s.id !== session.id)],
+        activeSessionId: session.id,
         currentSession: session,
         messages: [],
         isLoadingSessions: false,
@@ -92,6 +112,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const apiClient = getApiClient();
       const session = await apiClient.getSession(sessionId);
+      if (get().activeSessionId !== sessionId) {
+        set({ isLoadingSessions: false });
+        return null;
+      }
       set((state) => ({
         currentSession: session,
         sessions: state.sessions.some((s) => s.id === session.id)
@@ -101,6 +125,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }));
       return session;
     } catch (error) {
+      if (get().activeSessionId !== sessionId) {
+        set({ isLoadingSessions: false });
+        return null;
+      }
       set({
         error: getApiErrorMessage(error, 'Failed to fetch session'),
         isLoadingSessions: false,
@@ -156,8 +184,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       const apiClient = getApiClient();
       const response = await apiClient.listSessionMessages(sessionId, 100, 0);
+      if (get().activeSessionId !== sessionId) {
+        set({ isLoadingMessages: false });
+        return;
+      }
       set({ messages: response.data, isLoadingMessages: false });
     } catch (error) {
+      if (get().activeSessionId !== sessionId) {
+        set({ isLoadingMessages: false });
+        return;
+      }
       set({
         error: getApiErrorMessage(error, 'Failed to fetch messages'),
         isLoadingMessages: false,
@@ -168,7 +204,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   sendMessage: async (content: string, documentId?: string) => {
     const state = get();
 
-    if (!state.currentSession) {
+    if (!state.currentSession || state.activeSessionId !== state.currentSession.id) {
       set({ error: 'No session selected' });
       return;
     }
@@ -202,7 +238,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         document_id: documentId,
       });
 
-      if (shouldRename && priorCount === 0) {
+      if (get().activeSessionId === sessionId && shouldRename && priorCount === 0) {
         try {
           await get().updateSession(sessionId, titleFromContent(content));
         } catch {
@@ -210,14 +246,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
 
-      // Refresh sidebar ordering after activity
-      const projectId = get().currentSession?.project_id;
-      if (projectId) {
-        void get().fetchSessions(projectId);
+      // Refresh sidebar ordering after activity, only if this chat is still open
+      if (get().activeSessionId === sessionId) {
+        const projectId = get().currentSession?.project_id;
+        if (projectId) {
+          void get().fetchSessions(projectId);
+        }
+      }
+
+      if (get().activeSessionId !== sessionId) {
+        return;
       }
 
       if (!response.ai_response) {
         set((s) => {
+          if (s.activeSessionId !== sessionId) return s;
           const filtered = s.messages.filter((m) => !m.id.startsWith('temp-'));
           return {
             messages: [...filtered, response.message],
@@ -230,6 +273,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
 
       set((s) => {
+        if (s.activeSessionId !== sessionId) return s;
         const filtered = s.messages.filter((m) => !m.id.startsWith('temp-'));
         return {
           messages: [...filtered, response.message, response.ai_response!],
@@ -238,11 +282,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         };
       });
     } catch (error) {
-      set((s) => ({
-        messages: s.messages.filter((m) => !m.id.startsWith('temp-')),
-        isGenerating: false,
-        error: getApiErrorMessage(error, 'Failed to send message'),
-      }));
+      set((s) => {
+        if (s.activeSessionId !== sessionId) return s;
+        return {
+          messages: s.messages.filter((m) => !m.id.startsWith('temp-')),
+          isGenerating: false,
+          error: getApiErrorMessage(error, 'Failed to send message'),
+        };
+      });
       throw error;
     }
   },
@@ -258,6 +305,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   reset: () => {
     set({
       sessions: [],
+      activeSessionId: null,
       currentSession: null,
       messages: [],
       isLoadingSessions: false,
